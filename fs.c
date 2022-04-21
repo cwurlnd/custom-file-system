@@ -5,8 +5,8 @@ Make your changes here.
 
 #include "fs.h"
 #include "disk.h"
-#include <time.h>
 
+#include <time.h>
 #include <stdio.h>
 #include <stdint.h>
 
@@ -39,8 +39,39 @@ union fs_block {
 	unsigned char data[BLOCK_SIZE];
 };
 
+int *freeBlocks;
+
+
 int fs_format()
 {
+	int i;
+	union fs_block superBlock;
+	disk_read(thedisk,0,superBlock.data);
+
+	// Check if a filesystem is already mounted
+	if (superBlock.super.magic == FS_MAGIC) {
+		return 0;
+	}
+
+	// Set aside 10% of blocks for inode blocks
+	if (thedisk->nblocks % 10 == 0) {
+		superBlock.super.ninodeblocks = (thedisk->nblocks / 10);
+	} else {
+		superBlock.super.ninodeblocks = (thedisk->nblocks / 10) + 1;
+	}
+
+	// Clear the inode table (initializes data to random values)
+	union fs_block randomBlock;
+	for (i = 0; i < thedisk->nblocks; i++) {
+		disk_write(thedisk, i, randomBlock.data);
+	}
+
+	// Write the superblock
+	superBlock.super.magic = FS_MAGIC;
+	superBlock.super.nblocks = thedisk->nblocks;
+	superBlock.super.ninodes = INODES_PER_BLOCK * superBlock.super.ninodeblocks;
+	disk_write(thedisk,0,superBlock.data);
+
 	return 0;
 }
 
@@ -51,20 +82,24 @@ void fs_debug()
 
 	disk_read(thedisk,0,block.data);
 
+	// Print the superblock data
 	printf("superblock:\n");
 	printf("    %d blocks\n",block.super.nblocks);
 	printf("    %d inode blocks\n",block.super.ninodeblocks);
 	printf("    %d inodes\n",block.super.ninodes);
 
+	// Loop through the inode blocks
 	for (i  = 1; i < block.super.ninodeblocks; i++) {
 		union fs_block inodeBlock;
 		disk_read(thedisk,i,inodeBlock.data);
+		// Loop through each inode in the inode block
 		for (j = 0; j < INODES_PER_BLOCK; j++) {
 			struct fs_inode myInode = inodeBlock.inode[j];
 			if (!myInode.isvalid) continue;
 			printf("inode %d:\n", j + ((i-1) * INODES_PER_BLOCK));
 			printf("    size: %d bytes\n",myInode.size);
 			printf("    created: %s",ctime(&myInode.ctime));
+			// Loop through the direct pointer in each inode 
 			if (myInode.direct) {
 				printf("    direct blocks: ");
 				for (k = 0; k < POINTERS_PER_INODE; k++) {
@@ -73,6 +108,7 @@ void fs_debug()
 				}
 				printf("\n");
 			}
+			// Loop through the indirect pointers in each inode
 			if (myInode.indirect) {
 				printf("    indirect block: %u\n", myInode.indirect);
 				union fs_block indirectBlock;
