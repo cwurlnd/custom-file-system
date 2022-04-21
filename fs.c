@@ -5,6 +5,7 @@ Make your changes here.
 
 #include "fs.h"
 #include "disk.h"
+#include <time.h>
 
 #include <stdio.h>
 #include <stdint.h>
@@ -45,6 +46,7 @@ int fs_format()
 
 void fs_debug()
 {
+	int i, j, k;
 	union fs_block block;
 
 	disk_read(thedisk,0,block.data);
@@ -53,6 +55,37 @@ void fs_debug()
 	printf("    %d blocks\n",block.super.nblocks);
 	printf("    %d inode blocks\n",block.super.ninodeblocks);
 	printf("    %d inodes\n",block.super.ninodes);
+
+	for (i  = 1; i < block.super.ninodeblocks; i++) {
+		union fs_block inodeBlock;
+		disk_read(thedisk,i,inodeBlock.data);
+		for (j = 0; j < INODES_PER_BLOCK; j++) {
+			struct fs_inode myInode = inodeBlock.inode[j];
+			if (!myInode.isvalid) continue;
+			printf("inode %d:\n", j + ((i-1) * INODES_PER_BLOCK));
+			printf("    size: %d bytes\n",myInode.size);
+			printf("    created: %s",ctime(&myInode.ctime));
+			if (myInode.direct) {
+				printf("    direct blocks: ");
+				for (k = 0; k < POINTERS_PER_INODE; k++) {
+					if (!myInode.direct[k]) continue;
+					printf("%u ", myInode.direct[k]);
+				}
+				printf("\n");
+			}
+			if (myInode.indirect) {
+				printf("    indirect block: %u\n", myInode.indirect);
+				union fs_block indirectBlock;
+				disk_read(thedisk,myInode.indirect,indirectBlock.data);
+				printf("    indirect data blocks: ");
+				for (k = 0; k < POINTERS_PER_BLOCK; k++) {
+					if (!indirectBlock.pointers[k]) continue;
+					printf("%u ", indirectBlock.pointers[k]);
+				}
+				printf("\n");
+			}
+		}
+	}
 }
 
 int fs_mount()
