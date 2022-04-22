@@ -95,7 +95,7 @@ void fs_debug()
 	printf("    %d inodes\n",block.super.ninodes);
 
 	// Loop through the inode blocks
-	for (i  = 1; i < block.super.ninodeblocks; i++) {
+	for (i = 1; i <= block.super.ninodeblocks; i++) {
 		union fs_block inodeBlock;
 		disk_read(thedisk,i,inodeBlock.data);
 		// Loop through each inode in the inode block
@@ -159,14 +159,14 @@ int fs_mount()
 		freeBlocks[i] = true;
 	}
 
-	for (i = 1; i < superBlock.super.ninodeblocks; i++) {
+	for (i = 1; i <= superBlock.super.ninodeblocks; i++) {
 		union fs_block inodeBlock;
 		disk_read(thedisk, i, inodeBlock.data);
 
 		// Set inode block to not free
 		freeBlocks[i] = false;
 		
-		for (j = 0; i < INODES_PER_BLOCK; j++) {
+		for (j = 0; j < INODES_PER_BLOCK; j++) {
 			struct fs_inode myInode = inodeBlock.inode[j];
 			if (!(myInode.isvalid)) continue;
 
@@ -230,18 +230,62 @@ int fs_create()
 
 int fs_delete( int inumber )
 {
+	int i, j;
 	union fs_block inodeBlock;
 	int32_t blockNum = (inumber / INODES_PER_BLOCK) + 1;
 	int32_t blockOffset = (inumber % INODES_PER_BLOCK) - 1;
 
 	disk_read(thedisk, blockNum, inodeBlock.data);
 
-	return 0;
+	// Check to make sure the inode is valid
+	if (inodeBlock.inode[blockOffset].isvalid == 0) return 0;
+
+	// Free the direct blocks
+	for (i = 0; i < POINTERS_PER_INODE; i++) {
+		if (inodeBlock.inode[blockOffset].direct[i]) {
+			freeBlocks[inodeBlock.inode[blockOffset].direct[i]] = true;
+			inodeBlock.inode[blockOffset].direct[i] = 0;
+		}
+	}
+
+	// Free the indirect block and subsequent pointers
+	if (inodeBlock.inode[blockOffset].indirect) {
+		union fs_block indirectBlock;
+		disk_read(thedisk, inodeBlock.inode[blockOffset].indirect, indirectBlock.data);
+
+		for (j = 0; j < POINTERS_PER_BLOCK; j++) {
+			if (indirectBlock.pointers[j]) {
+				freeBlocks[indirectBlock.pointers[j]] = true;
+				indirectBlock.pointers[j] = 0;
+			}
+		}
+
+		freeBlocks[inodeBlock.inode[blockOffset].indirect] = true;
+	}
+
+	inodeBlock.inode[blockOffset].isvalid = 0;
+	inodeBlock.inode[blockOffset].indirect = 0;
+	inodeBlock.inode[blockOffset].size = 0;
+	inodeBlock.inode[blockOffset].ctime = time(NULL);
+
+	disk_write(thedisk, blockNum, inodeBlock.data);
+
+	return 1;
 }
 
 int fs_getsize( int inumber )
 {
-	return 0;
+	union fs_block inodeBlock;
+	int32_t blockNum = (inumber / INODES_PER_BLOCK) + 1;
+	int32_t blockOffset = (inumber % INODES_PER_BLOCK) - 1;
+
+	disk_read(thedisk, blockNum, inodeBlock.data);
+
+	if (inodeBlock.inode[blockOffset].isvalid) {
+		return inodeBlock.inode[blockOffset].size;
+	} else {
+		return -1;
+	}
 }
 
 int fs_read( int inumber, char *data, int length, int offset )
@@ -253,3 +297,5 @@ int fs_write( int inumber, const char *data, int length, int offset )
 {
 	return 0;
 }
+
+// CHANGE THE INODES PER BLOCK TO 128 *************
