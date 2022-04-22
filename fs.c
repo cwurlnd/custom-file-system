@@ -62,7 +62,10 @@ int fs_format()
 
 	// Clear the inode table (initializes data to random values)
 	union fs_block randomBlock;
-	for (i = 0; i < thedisk->nblocks; i++) {
+	for (i = 0; i < BLOCK_SIZE; i++) {
+		randomBlock.data[i] = 0;
+	}
+	for (i = 1; i < thedisk->nblocks; i++) {
 		disk_write(thedisk, i, randomBlock.data);
 	}
 
