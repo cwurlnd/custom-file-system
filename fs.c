@@ -15,7 +15,7 @@ Make your changes here.
 extern struct disk *thedisk;
 
 #define FS_MAGIC           0x30341003
-#define INODES_PER_BLOCK   4
+#define INODES_PER_BLOCK   128
 #define POINTERS_PER_INODE 3
 #define POINTERS_PER_BLOCK 1024
 
@@ -43,7 +43,6 @@ union fs_block {
 
 bool *freeBlocks;
 bool mounted = false;
-
 
 int fs_format()
 {
@@ -290,11 +289,66 @@ int fs_getsize( int inumber )
 
 int fs_read( int inumber, char *data, int length, int offset )
 {
-	return 0;
+	int i;
+
+	union fs_block inodeBlock;
+	int32_t dataBlock = offset / BLOCK_SIZE;
+	int32_t dataOffset = offset % BLOCK_SIZE;
+	int32_t inoBlock = (inumber / INODES_PER_BLOCK) + 1;
+	int32_t inoOffset = (inumber % INODES_PER_BLOCK) - 1;
+
+	disk_read(thedisk, inoBlock, inodeBlock.data);
+	if (!(inodeBlock.inode[inoOffset].isvalid)) return 0;
+	if (offset > inodeBlock.inode[inoOffset].size) return 0; 
+
+	union fs_block currDataBlock; // Holds whatever data is currently being read
+	int bytes = 0;
+
+	while (offset < inodeBlock.inode[inoOffset].size && bytes < length) {
+		int currBlock = 0;
+
+		// Direct data blocks
+		if (dataBlock < POINTERS_PER_INODE) {
+			currBlock = inodeBlock.inode[inoOffset].direct[dataBlock];
+		} // Indirect data blocks
+		else if (inodeBlock.inode[inoOffset].indirect) {
+			union fs_block indirectBlock;
+			disk_read(thedisk, inodeBlock.inode[inoOffset].indirect, indirectBlock.data);
+			currBlock = indirectBlock.pointers[dataBlock - POINTERS_PER_INODE];
+		}
+
+		disk_read(thedisk, currBlock, currDataBlock.data);
+
+		// Read the bytes
+		for (i = dataOffset; i < BLOCK_SIZE; i++) {
+			if (offset >= inodeBlock.inode[inoOffset].size || bytes >= length) {
+				break;
+			}
+			data[bytes] = currDataBlock.data[i];
+			offset++;
+			bytes++;
+		}
+		dataOffset = 0;
+		dataBlock++;
+	}
+
+	return bytes;
 }
 
 int fs_write( int inumber, const char *data, int length, int offset )
 {
+	union fs_block inodeBlock;
+	int32_t inoBlock = (inumber / INODES_PER_BLOCK) + 1;
+	int32_t inoOffset = (inumber % INODES_PER_BLOCK) - 1;
+
+	disk_read(thedisk, inoBlock, inodeBlock.data);
+	if (!(inodeBlock.inode[inoOffset].isvalid)) return 0;
+	if (offset > inodeBlock.inode[inoOffset].size) return 0; 
+
+	// int bytes = 0;
+
+
+
 	return 0;
 }
 
