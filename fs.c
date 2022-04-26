@@ -132,9 +132,6 @@ void fs_debug()
 int fs_mount()
 {
 	int i, j, k;
-	if (mounted) {
-		return 0;
-	}
 
 	mounted = true;
 
@@ -195,6 +192,10 @@ int fs_mount()
 
 int fs_create()
 {
+	if (!mounted) {
+		return 0;
+	}
+
 	int i, j, k;
 	union fs_block superBlock;
 	disk_read(thedisk,0,superBlock.data);
@@ -229,6 +230,10 @@ int fs_create()
 
 int fs_delete( int inumber )
 {
+	if (!mounted) {
+		return 0;
+	}
+
 	int i, j;
 	union fs_block inodeBlock;
 	int32_t blockNum = (inumber / INODES_PER_BLOCK) + 1;
@@ -274,6 +279,10 @@ int fs_delete( int inumber )
 
 int fs_getsize( int inumber )
 {
+	if (!mounted) {
+		return -1;
+	}
+
 	union fs_block inodeBlock;
 	int32_t blockNum = (inumber / INODES_PER_BLOCK) + 1;
 	int32_t blockOffset = (inumber % INODES_PER_BLOCK) - 1;
@@ -289,6 +298,10 @@ int fs_getsize( int inumber )
 
 int fs_read( int inumber, char *data, int length, int offset )
 {
+	if (!mounted) {
+		return 0;
+	}
+
 	int i;
 
 	union fs_block inodeBlock;
@@ -337,7 +350,15 @@ int fs_read( int inumber, char *data, int length, int offset )
 
 int fs_write( int inumber, const char *data, int length, int offset )
 {
+	if (!mounted) {
+		return 0;
+	}
+
+	int i;
+
 	union fs_block inodeBlock;
+	int32_t dataBlock = offset / BLOCK_SIZE;
+	int32_t dataOffset = offset % BLOCK_SIZE;
 	int32_t inoBlock = (inumber / INODES_PER_BLOCK) + 1;
 	int32_t inoOffset = (inumber % INODES_PER_BLOCK) - 1;
 
@@ -345,11 +366,105 @@ int fs_write( int inumber, const char *data, int length, int offset )
 	if (!(inodeBlock.inode[inoOffset].isvalid)) return 0;
 	if (offset > inodeBlock.inode[inoOffset].size) return 0; 
 
-	// int bytes = 0;
+	int bytes = 0;
+	int writeBlock;
 
+	while (bytes < length) {
+		union fs_block tempBlock; 
+		int currBlock = 0;
 
+		if (dataBlock < POINTERS_PER_INODE) { // Direct pointers
+			currBlock = dataBlock;
 
-	return 0;
+			if (inodeBlock.inode[inoOffset].direct[currBlock]) { // Check if a direct pointer already exists
+				writeBlock = inodeBlock.inode[inoOffset].direct[currBlock];
+			}
+			else { // Find a block for a direct pointer
+				int freeBlock = -1;
+				for (i = 1; i < disk_nblocks(thedisk); i++) {
+					if (freeBlocks[i]) {
+						freeBlock = i;
+						freeBlocks[freeBlock] = false;
+						break;
+					}
+				}
+				if (freeBlock == -1) break;
+				writeBlock = freeBlock;
+			}
+
+			for (i = dataOffset; i < BLOCK_SIZE; i++) { // Write the data to the direct pointer
+				if (bytes >= length) break;
+				tempBlock.data[i] = data[bytes];
+				bytes++;
+			}
+
+			dataOffset = 0;
+			disk_write(thedisk, writeBlock, tempBlock.data); // Write the data to the disk 
+
+			inodeBlock.inode[inoOffset].direct[currBlock] = writeBlock;
+		}
+		else if (dataBlock < (POINTERS_PER_BLOCK + POINTERS_PER_INODE)) { // Indirect blocks
+			int indirectBlock = 0;
+			if (!(inodeBlock.inode[inoOffset].indirect)) { // Check if an indirect block already exists
+				int freeBlock = -1;
+				for (i = 1; i < disk_nblocks(thedisk); i++) {
+					if (freeBlocks[i]) {
+						freeBlock = i;
+						freeBlocks[freeBlock] = false;
+						break;
+					}
+				}
+				if (freeBlock == -1) break;
+
+				union fs_block randomBlock;
+				for (i = 0; i < BLOCK_SIZE; i++) {
+					randomBlock.data[i] = 0;
+				}
+				disk_write(thedisk, freeBlock, randomBlock.data);
+				indirectBlock = freeBlock;
+				inodeBlock.inode[inoOffset].indirect = indirectBlock;
+			}
+			else {
+				indirectBlock = inodeBlock.inode[inoOffset].indirect;
+			}
+
+			union fs_block tempBlock2;
+			disk_read(thedisk, inodeBlock.inode[inoOffset].indirect, tempBlock2.data);
+			currBlock = tempBlock2.pointers[dataBlock - POINTERS_PER_INODE];
+			if (!(currBlock)) { // Check if a block is free to use
+				int freeBlock = -1;
+				for (i = 1; i < disk_nblocks(thedisk); i++) {
+					if (freeBlocks[i]) {
+						freeBlock = i;
+						freeBlocks[freeBlock] = false;
+						break;
+					}
+				}
+				if (freeBlock == -1) break;
+				writeBlock = freeBlock;
+			}
+			else {
+				writeBlock = currBlock;
+			}
+
+			for (i = dataOffset; i < BLOCK_SIZE; i++) { // Write the data
+				if (bytes >= length) break;
+				tempBlock.data[i] = data[bytes];
+				bytes++;
+			}
+
+			dataOffset = 0;
+			tempBlock2.pointers[dataBlock - POINTERS_PER_INODE] = writeBlock;
+
+			disk_write(thedisk, writeBlock, tempBlock.data);
+			disk_write(thedisk, indirectBlock, tempBlock2.data);
+		}
+		dataBlock++;
+	}
+	inodeBlock.inode[inoOffset].size = bytes + offset;
+	inodeBlock.inode[inoOffset].isvalid = 1;
+
+	disk_write(thedisk, inoBlock, inodeBlock.data);
+
+	return bytes;
 }
-
-// CHANGE THE INODES PER BLOCK TO 128 *************
