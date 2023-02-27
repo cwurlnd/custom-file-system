@@ -10,4 +10,4 @@ It makes use of knowledge of the following principles:
 - Valid and invalid inodes
 - and much more!
 
-It is all written in C and is operational
+It is all written in C and is operational.
